@@ -1,69 +1,229 @@
-import Image from "next/image";
+'use client';
+
+import React, { useState } from 'react';
+import { Navbar } from '@/components/layout/Navbar';
+import { LandingHero } from '@/components/landing/LandingHero';
+import { TripConfigWizard } from '@/components/config/TripConfigWizard';
+import { AIGenerationProgress } from '@/components/loading/AIGenerationProgress';
+import { ItineraryView } from '@/components/itinerary/ItineraryView';
+import { TripConfig, TripPlan } from '@/types/trip';
+import { bandungTripPlan, generateCustomPlan } from '@/data/mockTrips';
 
 export default function Home() {
+  const [viewState, setViewState] = useState<'landing' | 'loading' | 'itinerary'>('landing');
+  const [isWizardOpen, setIsWizardOpen] = useState(false);
+  const [wizardCity, setWizardCity] = useState('Bandung');
+  const [currentPlan, setCurrentPlan] = useState<TripPlan>(bandungTripPlan);
+  const [apiGeneratedPlan, setApiGeneratedPlan] = useState<TripPlan | null>(null);
+  const apiGeneratedPlanRef = React.useRef<TripPlan | null>(null);
+
+  // Staged config during loading animation
+  const [pendingConfig, setPendingConfig] = useState<{
+    destination: string;
+    budget: number;
+    durationDays: number;
+    travelers: number;
+    fullConfig?: TripConfig;
+  }>({
+    destination: 'Bandung',
+    budget: 3000000,
+    durationDays: 3,
+    travelers: 2,
+  });
+
+  const fetchTripPlanFromApi = async (payload: {
+    destination: string;
+    budget: number;
+    durationDays: number;
+    travelers: number;
+    travelStyle?: string;
+    pace?: string;
+    preferences?: TripConfig['preferences'];
+    startDate?: string;
+  }) => {
+    try {
+      const res = await fetch('/api/trips/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (data.success && data.data) {
+        apiGeneratedPlanRef.current = data.data;
+        setApiGeneratedPlan(data.data);
+        setCurrentPlan(data.data);
+        return data.data;
+      }
+    } catch (err) {
+      console.warn('API generate failed, fallback to local generator:', err);
+    }
+    return null;
+  };
+
+  // Handler for Quick Generator from Landing
+  const handleQuickGenerate = (
+    destination: string,
+    budget: number,
+    durationDays: number,
+    travelers: number
+  ) => {
+    setPendingConfig({
+      destination,
+      budget,
+      durationDays,
+      travelers,
+    });
+    apiGeneratedPlanRef.current = null;
+    setApiGeneratedPlan(null);
+    fetchTripPlanFromApi({
+      destination,
+      budget,
+      durationDays,
+      travelers,
+      travelStyle: 'balanced',
+      pace: 'balanced',
+    });
+    setViewState('loading');
+  };
+
+  // Handler from Detailed Wizard
+  const handleWizardSubmit = (config: TripConfig) => {
+    setIsWizardOpen(false);
+    setPendingConfig({
+      destination: config.destination,
+      budget: config.budget,
+      durationDays: config.durationDays,
+      travelers: config.travelers,
+      fullConfig: config,
+    });
+    apiGeneratedPlanRef.current = null;
+    setApiGeneratedPlan(null);
+    fetchTripPlanFromApi({
+      destination: config.destination,
+      budget: config.budget,
+      durationDays: config.durationDays,
+      travelers: config.travelers,
+      travelStyle: config.travelStyle,
+      pace: config.pace,
+      preferences: config.preferences,
+      startDate: config.startDate,
+    });
+    setViewState('loading');
+  };
+
+  // Callback when AI generation progress animation finishes
+  const handleGenerationComplete = () => {
+    const planToUse = apiGeneratedPlanRef.current || apiGeneratedPlan;
+    if (planToUse) {
+      setCurrentPlan(planToUse);
+    } else if (
+      pendingConfig.destination.toLowerCase().includes('bandung') &&
+      !pendingConfig.fullConfig
+    ) {
+      setCurrentPlan(bandungTripPlan);
+    } else {
+      const generated = generateCustomPlan(
+        pendingConfig.fullConfig || {
+          destination: pendingConfig.destination,
+          budget: pendingConfig.budget,
+          durationDays: pendingConfig.durationDays,
+          travelers: pendingConfig.travelers,
+        }
+      );
+      setCurrentPlan(generated);
+    }
+    setViewState('itinerary');
+  };
+
+  const handleOpenDetailedWizard = (initialCity?: string) => {
+    if (initialCity) {
+      const city = initialCity.split(',')[0].trim();
+      setWizardCity(city);
+    }
+    setIsWizardOpen(true);
+  };
+
+  const handleSelectSampleCity = (city: string) => {
+    if (city === 'Bandung') {
+      setCurrentPlan(bandungTripPlan);
+      setViewState('itinerary');
+    } else {
+      handleQuickGenerate(
+        city,
+        city === 'Bali' ? 5000000 : 3000000,
+        city === 'Bali' ? 4 : 3,
+        2
+      );
+    }
+  };
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert h-5 w-[100px]"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the{" "}
-            <code className="rounded bg-black/[.06] px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-white/[.08]">
-              page.tsx
-            </code>{" "}
-            file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert h-[14px] w-4"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
+    <div className="min-h-screen flex flex-col bg-background text-foreground antialiased selection:bg-emerald-500/20 selection:text-emerald-700">
+      {/* Top Navigation */}
+      <Navbar
+        onNewTripClick={() => handleOpenDetailedWizard()}
+        onSelectSampleCity={handleSelectSampleCity}
+      />
+
+      {/* Main Content Area */}
+      <main className="flex-1">
+        {viewState === 'landing' && (
+          <LandingHero
+            onQuickGenerate={handleQuickGenerate}
+            onOpenDetailedWizard={handleOpenDetailedWizard}
+          />
+        )}
+
+        {viewState === 'loading' && (
+          <AIGenerationProgress
+            destination={pendingConfig.destination}
+            budget={pendingConfig.budget}
+            durationDays={pendingConfig.durationDays}
+            travelers={pendingConfig.travelers}
+            isReady={Boolean(apiGeneratedPlan)}
+            onComplete={handleGenerationComplete}
+          />
+        )}
+
+        {viewState === 'itinerary' && (
+          <ItineraryView
+            plan={currentPlan}
+            onEditConfig={() => handleOpenDetailedWizard(currentPlan.destination)}
+            onUpdatePlan={(updated) => setCurrentPlan(updated)}
+            onResetToLanding={() => setViewState('landing')}
+          />
+        )}
       </main>
+
+      {/* Detailed Trip Configuration Modal */}
+      <TripConfigWizard
+        isOpen={isWizardOpen}
+        initialCity={viewState === 'itinerary' ? currentPlan.destination : wizardCity}
+        initialBudget={viewState === 'itinerary' ? currentPlan.budgetTotal : pendingConfig.budget}
+        initialDays={viewState === 'itinerary' ? currentPlan.days.length : pendingConfig.durationDays}
+        initialTravelers={viewState === 'itinerary' ? currentPlan.travelers : pendingConfig.travelers}
+        initialTravelStyle={viewState === 'itinerary' ? currentPlan.travelStyle : pendingConfig.fullConfig?.travelStyle}
+        initialPace={viewState === 'itinerary' ? currentPlan.pace : pendingConfig.fullConfig?.pace}
+        onClose={() => setIsWizardOpen(false)}
+        onGenerateTrip={handleWizardSubmit}
+      />
+
+      {/* Footer */}
+      <footer className="border-t border-border/40 py-8 bg-muted/20 text-xs text-muted-foreground mt-auto">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div className="flex items-center gap-2">
+            <span className="font-bold text-foreground font-heading">TripCraft</span>
+            <span>— Asisten Perencana Rute & Estimasi Anggaran Wisata Realistis</span>
+          </div>
+          <div className="flex items-center gap-4 text-[11px]">
+            <span>Bahasa Indonesia</span>
+            <span>·</span>
+            <span>Prakiraan Cuaca Terintegrasi</span>
+            <span>·</span>
+            <span>Optimasi TSP Searah</span>
+          </div>
+        </div>
+      </footer>
     </div>
   );
 }
